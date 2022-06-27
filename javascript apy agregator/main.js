@@ -11,11 +11,11 @@ function trierTableau(e, table){
     console.log(e.target.id);
     table = table.sort(function(a,b){
         if(a[colonne]>b[colonne]){
-            return sens*1
+            return sens
         }else if(a[colonne]==b[colonne]){
             return 0
         }else{
-            return sens*(-1)
+            return -sens
         }
     });
 
@@ -23,9 +23,6 @@ function trierTableau(e, table){
     
     genererTableau(table);
 }
-
-
-
 
 function ajouterBouttonEvent(table){
     let i = 0;
