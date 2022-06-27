@@ -1,19 +1,30 @@
 function trierTableau(e, table){
+    function sensDuTri(){
+        if(e.target.className==="croissant"){
+            e.target.setAttribute("class", "decroissant")
+            return -1 
+        }
+        e.target.setAttribute("class", "croissant") 
+        return 1}
+    let sens = sensDuTri()
     let colonne = e.target.id;
     console.log(e.target.id);
     table = table.sort(function(a,b){
         if(a[colonne]>b[colonne]){
-            return 1
+            return sens*1
         }else if(a[colonne]==b[colonne]){
             return 0
         }else{
-            return -1
+            return sens*(-1)
         }
     });
+
     document.querySelector("tbody").innerHTML=""; //Supprime le tableau existant pour le remplacer ensuite par celui trié.
     
     genererTableau(table);
 }
+
+
 
 
 function ajouterBouttonEvent(table){
