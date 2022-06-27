@@ -87,14 +87,25 @@ async function obtenirTVLBeefy(tab){
 
 }
 
-function estRendement(i, j, table){ 
-// vérifie si la cellule à l'indice j est à la colonne rendement, pour la convetir en pourcentage
-    
+function formater(i, j, table){ 
+// vérifie le numéro de colonne et applique le formatage adéquat
+    let cellule = table[i][j];
     if (j==2){
-        return table[i][j].toFixed(2) + "%"
-    } else {
-        return table[i][j]
-    }}
+        return cellule.toFixed(2) + "%" // Pourcentage
+    } else if(j==3){ // Séparateur de millier
+        cellule=String(Math.round(cellule));
+        console.log(typeof(cellule));
+        l = cellule.length;
+        cellule = cellule.split("");
+        for(let k=l-3; k>0; k-=3){
+           console.log(cellule)
+           cellule.splice(k,0," ");
+        }
+        return cellule.join("")
+    } else { // Non formaté
+        return cellule
+    }
+}
 
 
 
@@ -112,7 +123,7 @@ function genererTableau(table) {
         for(let j = 0; j<table[i].length; j++) {
 
             let cellule = document.createElement("td");
-            cellule.textContent = estRendement(i, j, table)
+            cellule.textContent = formater(i, j, table);
 
             ligne.appendChild(cellule);
             
