@@ -15,7 +15,7 @@ const { setInterval } = require('timers/promises');
 
 var app = express();
 
-mongoose.connect("mongodb+srv://Frodogorn:Papa&maman18@basetest.wre6m.mongodb.net/?retryWrites=true&w=majority");
+mongoose.connect("mongodb+srv://Frodogorn:mdp@basetest.wre6m.mongodb.net/?retryWrites=true&w=majority");
 
 setInterval(fonctions.updateApy, 1000*86400);
 
