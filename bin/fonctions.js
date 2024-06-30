@@ -1,152 +1,152 @@
-const { default: fetch } = require("node-fetch");
-const { donneesApy } = require("../model/schema");
-const math = require("mathjs")
+// Importing required modules
+import fetch from 'node-fetch';
+import { donneesApy } from '../model/schema.js';
+import * as math from 'mathjs';
+import mongoose from 'mongoose';
 
-mongoose = require("mongoose");
+// Database ID for storing APY data
+const ID_BASE_DONNEES = "62c700c6f37c5e226eef6cff";
 
-let id_base_donnees = "62c700c6f37c5e226eef6cff";
-
-
+/**
+ * Fetches and processes APY data from Beefy Finance API
+ * @returns {Array} Processed APY data
+ */
 async function obtenirApyBeefy() {
-    let response = await fetch("https://api.beefy.finance/apy");
-    let apy_non_traite =  await response.json();
-    let apys = [];
-
-    for (let apy in apy_non_traite){
-        apys.push([apy.split("-"), [apy_non_traite[apy]]]); // sépare les données du fichier json en trois colonnes: le nom de la plateforme, le pool de liquidité et le rendement.
-    }
-    apys = apys.map( x=>{return x[0].concat(x[1])});
-    apys = apys.map(x=>{
-        // rajoute un tiret entre les noms de coins des pools de liquidité, pour plus de lisibilité
-        if (x.length == 4){
-            x[1] += '-'+x[2];
-            x.splice(2, 1)
-        } else {
-           for(let i = 1; i<x.length-1; i++){
-            x[1] += ('-'+x[i])
-           }
-           x.splice(2, x.length-1)
-    }
-        x[x.length-1] *= 100
-        return x
-    })
-    apys = apys.filter(x=> {return (x.length>2 && x[x.length-1]>0)}); //supprime les pools avec un rendement nul
-
+    const response = await fetch("https://api.beefy.finance/apy");
+    const apyNonTraite = await response.json();
     
-    return apys
+    // Process and format APY data
+    let apys = Object.entries(apyNonTraite).map(([key, value]) => {
+        const [platform, ...poolParts] = key.split("-");
+        const pool = poolParts.join("-");
+        return [platform, pool, value * 100];
+    });
+
+    // Filter out pools with zero or negative APY
+    return apys.filter(([, , apy]) => apy > 0);
 }
 
-async function obtenirTVLBeefy(tab){
-    
-    response = await fetch("https://api.beefy.finance/tvl");
-    listeTVL = await response.json();
-    listeTVL = Object.values(listeTVL);
+/**
+ * Fetches TVL data from Beefy Finance API and merges it with APY data
+ * @param {Array} tab APY data
+ * @returns {Array} Merged APY and TVL data
+ */
+async function obtenirTVLBeefy(tab) {
+    const response = await fetch("https://api.beefy.finance/tvl");
+    const listeTVL = await response.json();
 
-    for(let i=0; i<tab.length; i++){
-        vault = tab[i][0]+"-"+tab[i][1]; // On récupère la clé de l'objet permettant d'obtenir la TVL d'un pool en réassemblant les données initiales
-        for(let j=0; j<listeTVL.length; j++){
-            if (listeTVL[j][vault] != undefined) {
-                tab[i].push(listeTVL[j][vault])
-            }
-        }
-    }
+    // Merge TVL data with existing APY data
+    const mergedData = tab.map(([platform, pool, apy]) => {
+        const vault = `${platform}-${pool}`;
+        const tvl = listeTVL[vault] || 0;
+        return [platform, pool, apy, tvl];
+    });
 
-    
-    return tab.filter(x=>{return x[3]>500000}) // Supprime les vaults avec moins de 500000 de TVL
-
+    // Filter out vaults with TVL less than 500,000
+    return mergedData.filter(([, , , tvl]) => tvl > 500000);
 }
 
-
+/**
+ * Generates initial APY data and saves it to the database
+ */
 async function genererApy() {
-    let apy = await obtenirApyBeefy();
-    let tableau = await obtenirTVLBeefy(apy);
-    let dict_historique = {}
-    for(let k=0; k<tableau.length; k++){
-        let cle = tableau[k][0]+'-'+tableau[k][1];
-        dict_historique[cle]={"APY":[tableau[k][2]], "TVL": [tableau[k][3]]}
-    }
-    const tableau_enregistre = new donneesApy({APY: dict_historique});
-    console.log(dict_historique);
-    tableau_enregistre.save()
-
-}
-
-async function updateApy(){
-    let apy = await obtenirApyBeefy();
-    let tableau = await obtenirTVLBeefy(apy);
-    let tableau_actuel = await donneesApy.findById(id_base_donnees).exec();
-    let dict_historique = {};
-    console.log(tableau_actuel.APY);
-
-    for(let k=0; k<tableau.length; k++){
-        let cle = tableau[k][0]+'-'+tableau[k][1];
-        dict_historique[cle]={"APY":[tableau[k][2]], "TVL": [tableau[k][3]]}
-        if (tableau_actuel.APY[cle]==undefined){   // Vérifie que Beefy ne contient pas de nouveaux vaults, et, si oui, les rajoute.
-            tableau_actuel.APY[cle] = {"APY":[tableau[k][2]], "TVL": [tableau[k][3]]}
-        }
-    }
+    const apy = await obtenirApyBeefy();
+    const tableau = await obtenirTVLBeefy(apy);
     
+    const dictHistorique = tableau.reduce((acc, [platform, pool, apy, tvl]) => {
+        const cle = `${platform}-${pool}`;
+        acc[cle] = { APY: [apy], TVL: [tvl] };
+        return acc;
+    }, {});
 
-    for (let k in tableau_actuel.APY){
-        let dict = tableau_actuel.APY[k];
+    const tableauEnregistre = new donneesApy({ APY: dictHistorique });
+    await tableauEnregistre.save();
+    console.log(dictHistorique);
+}
 
-        dict.Score = calculerScore(dict.APY, dict.TVL, 90);
-        
-        if (dict == undefined || dict_historique[k] == undefined){
-            continue
+/**
+ * Updates existing APY data in the database
+ */
+async function updateApy() {
+    const apy = await obtenirApyBeefy();
+    const tableau = await obtenirTVLBeefy(apy);
+    const tableauActuel = await donneesApy.findById(ID_BASE_DONNEES).exec();
+
+    // Process new data
+    const dictHistorique = tableau.reduce((acc, [platform, pool, apy, tvl]) => {
+        const cle = `${platform}-${pool}`;
+        acc[cle] = { APY: [apy], TVL: [tvl] };
+        return acc;
+    }, {});
+
+    // Update existing data and add new vaults if any
+    for (const [platform, pool, apy, tvl] of tableau) {
+        const cle = `${platform}-${pool}`;
+        if (!tableauActuel.APY[cle]) {
+            tableauActuel.APY[cle] = { APY: [], TVL: [] };
         }
-
-        dict.APY.push(dict_historique[k].APY[0]);
-        dict.TVL.push(dict_historique[k].TVL[0]);
-
+        tableauActuel.APY[cle].APY.push(apy);
+        tableauActuel.APY[cle].TVL.push(tvl);
+        tableauActuel.APY[cle].Score = calculerScore(tableauActuel.APY[cle].APY, tableauActuel.APY[cle].TVL, 90);
     }
 
-
-    donneesApy.findByIdAndUpdate(id_base_donnees, tableau_actuel, function(err, docs){
-        console.log(docs.APY);
-        console.log("Base de données mise à jour")
-    })
+    // Save updated data
+    await donneesApy.findByIdAndUpdate(ID_BASE_DONNEES, tableauActuel);
+    console.log("Base de données mise à jour");
 }
 
-function moyenne_inverse(tab, nombre_jour){
-    let somme = 0; 
-    let intervalle = tab.length-nombre_jour;
-    for(let i=tab.length-1; i>intervalle; i--){
-        somme+=tab[i]
-    }
-    let moyenne = somme/nombre_jour;
-
-    return moyenne
+/**
+ * Calculates the inverse average of the last n days
+ * @param {Array} tab Data array
+ * @param {Number} nombreJour Number of days to consider
+ * @returns {Number} Inverse average
+ */
+function moyenneInverse(tab, nombreJour) {
+    const recentData = tab.slice(-nombreJour);
+    return recentData.reduce((sum, val) => sum + val, 0) / nombreJour;
 }
 
-function calculerScore(tab1, tab2, nombre_jour){
-
-    if( tab1.length < nombre_jour || tab2.length < nombre_jour){
-        return "Données insuffisantes"
+/**
+ * Calculates a score based on APY and TVL data
+ * @param {Array} tab1 APY data
+ * @param {Array} tab2 TVL data
+ * @param {Number} nombreJour Number of days to consider
+ * @returns {Number|String} Calculated score or "Données insuffisantes"
+ */
+function calculerScore(tab1, tab2, nombreJour) {
+    if (tab1.length < nombreJour || tab2.length < nombreJour) {
+        return "Données insuffisantes";
     }
 
-    let moyenneApy = moyenne_inverse(tab1, nombre_jour);
-    let moyenneTvl = moyenne_inverse(tab2, nombre_jour);
+    const moyenneApy = moyenneInverse(tab1, nombreJour);
+    const moyenneTvl = moyenneInverse(tab2, nombreJour);
 
-    let sum2 = 0;
+    const recentApy = tab1.slice(-nombreJour);
+    const variance = recentApy.reduce((sum, val) => sum + Math.pow(val - moyenneApy, 2), 0) / nombreJour;
+    const std = Math.sqrt(variance);
 
-    for(let i=tab1.length-1; i>tab1.length-nombre_jour; i--){
-        sum2+=math.pow(tab1[i]-moyenneApy, 2)
-    }
-   let std = math.sqrt(sum2/nombre_jour);
-   let Score = moyenneApy/std*moyenneTvl/1000000;
-   
-   return Score 
+    return (moyenneApy / std) * (moyenneTvl / 1000000);
 }
 
-async function envoyerTableauScore(){
-    let tableau_actuel = await donneesApy.findById(id_base_donnees).exec()
-    let tableau_score = {};
-    
-    for (let k in tableau_actuel.APY){
-        tableau_score[k] = tableau_actuel.APY[k].Score
-    }
-    return tableau_score
+/**
+ * Retrieves and returns the score table
+ * @returns {Object} Table of scores for each vault
+ */
+async function envoyerTableauScore() {
+    const tableauActuel = await donneesApy.findById(ID_BASE_DONNEES).exec();
+    return Object.entries(tableauActuel.APY).reduce((acc, [key, value]) => {
+        acc[key] = value.Score;
+        return acc;
+    }, {});
 }
 
-module.exports = {"getApy": obtenirApyBeefy, "getTVL" : obtenirTVLBeefy, "generateApy":genererApy, "updateApy":updateApy, "moyenne_inverse": moyenne_inverse, "calculerScore" : calculerScore, "envoyerTableauScore": envoyerTableauScore}
+// Exporting functions for use in other modules
+export {
+    obtenirApyBeefy,
+    obtenirTVLBeefy,
+    genererApy,
+    updateApy,
+    moyenneInverse,
+    calculerScore,
+    envoyerTableauScore
+};
